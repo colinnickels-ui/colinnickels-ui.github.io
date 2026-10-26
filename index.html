@@ -66,6 +66,14 @@
   .legend span { display: inline-flex; align-items: center; gap: 8px; }
   .legend i { width: 10px; height: 10px; display: inline-block; }
   .legend i.line { height: 2px; width: 16px; }
+  .legend i.dash { background: repeating-linear-gradient(90deg, var(--red) 0 4px, transparent 4px 7px); }
+
+  .payback-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; margin-bottom: 16px; }
+  .payback-stats .label { font: 500 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
+  .payback-stats .value { font-size: 20px; font-weight: 600; margin-top: 8px; font-variant-numeric: tabular-nums; }
+  .payback-stats .note { color: var(--ink-3); font-size: 12px; margin-top: 2px; }
+  .progress { height: 6px; background: var(--grid); margin-bottom: 24px; position: relative; }
+  .progress span { position: absolute; inset: 0 auto 0 0; background: var(--red); }
 
   .chart { position: relative; }
   .chart svg { display: block; width: 100%; overflow: visible; }
@@ -115,6 +123,7 @@
     .kpi { border-bottom: 1px solid var(--line); }
     .kpi.hero { grid-column: 1 / -1; }
     .split { grid-template-columns: 1fr; }
+    .payback-stats { grid-template-columns: 1fr 1fr; }
   }
   @media (max-width: 520px) {
     main { padding: 32px 16px 60px; }
@@ -142,6 +151,20 @@
       </div>
     </div>
     <div class="chart" id="bars"></div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>Payback<small>Savings so far against the system's net cost, projected forward at the last 12 bills' pace</small></h2>
+      <div class="legend">
+        <span><i class="line" style="background:var(--red)"></i>Saved</span>
+        <span><i class="line dash"></i>Projected</span>
+        <span><i class="line" style="background:var(--ink-3)"></i>Net cost</span>
+      </div>
+    </div>
+    <div class="payback-stats" id="payback-stats"></div>
+    <div class="progress" id="progress"></div>
+    <div class="chart" id="payback"></div>
   </section>
 
   <div class="split">
@@ -186,6 +209,10 @@ const FLAGS = {
   "2026-07": "Production far below normal; possible outage or data gap.",
 };
 const CREDITS = "EnergyWise Home Battery $53 + AC $8 per bill";
+const SYSTEM = {
+  cost: 39760,
+  incentives: [["Duke rebate", 9000], ["Federal tax credit (est.)", 11928]],
+};
 
 const $ = s => document.querySelector(s);
 const NS = "http://www.w3.org/2000/svg";
@@ -224,7 +251,7 @@ function niceMax(v) {
 }
 
 // Shared chart frame: returns svg, scales and helpers
-function frame(container, rows, maxY, { height = 300, fmt = v => v } = {}) {
+function frame(container, rows, maxY, { height = 300, fmt = v => v, tick = null } = {}) {
   container.innerHTML = "";
   const W = container.clientWidth, H = height;
   const m = { t: 12, r: 8, b: 28, l: 52 };
@@ -248,9 +275,10 @@ function frame(container, rows, maxY, { height = 300, fmt = v => v } = {}) {
 
   const every = band < 34 ? Math.ceil(34 / band) : 1;
   rows.forEach((r, i) => {
-    if (i % every) return;
+    const text = tick ? tick(r, i) : (i % every ? null : short(r.month));
+    if (!text) return;
     const t = el("text", { x: x(i), y: H - 8, "text-anchor": "middle" }, axis);
-    t.textContent = short(r.month);
+    t.textContent = text;
   });
 
   const tip = document.createElement("div");
@@ -359,6 +387,73 @@ function drawLines(container, rows, series, { fmt, height = 260, area = false } 
   t.textContent = s0.fmt(rows[last][s0.key]);
 }
 
+const nextMonth = m => { let [y, mo] = m.split("-").map(Number); mo === 12 ? (y++, mo = 1) : mo++; return `${y}-${String(mo).padStart(2, "0")}`; };
+
+function drawPayback(rows) {
+  const net = SYSTEM.cost - SYSTEM.incentives.reduce((a, [, v]) => a + v, 0);
+  const saved = rows[rows.length - 1].cumulative;
+  // pace = last 12 closed bills (the final row is the open, partial bill)
+  const closed = rows.slice(0, -1).slice(-12);
+  const perMonth = closed.reduce((a, r) => a + r.total_savings, 0) / closed.length;
+
+  // extend the timeline month by month until the projection crosses net cost
+  const line = rows.map(r => ({ month: r.month, cumulative: r.cumulative, actual: true }));
+  let m = rows[rows.length - 1].month, v = saved;
+  while (v < net && line.length < 400) {
+    m = nextMonth(m); v += perMonth;
+    line.push({ month: m, cumulative: v, actual: false });
+  }
+  const payIdx = line.findIndex(p => p.cumulative >= net);
+  const payMonth = line[payIdx].month;
+  const years = (payIdx + 1) / 12;
+  const pct = Math.min(1, saved / net);
+
+  const stats = [
+    ["Net cost", usd(net), `${usd(SYSTEM.cost)} − ${SYSTEM.incentives.map(([n, a]) => `${usd(a)} ${n.split(" (")[0].toLowerCase()}`).join(" − ")}`],
+    ["Paid back", `${(pct * 100).toFixed(1)}%`, `${usd(saved)} of ${usd(net)}`],
+    ["Pace", `${usd(perMonth * 12)}/yr`, `${usd(perMonth)}/mo, last ${closed.length} bills`],
+    ["Est. payback", label(payMonth), `~${years.toFixed(1)} years from install`],
+  ];
+  $("#payback-stats").innerHTML = stats.map(([l, v, n]) =>
+    `<div><div class="label">${l}</div><div class="value">${v}</div><div class="note">${n}</div></div>`).join("");
+  $("#progress").innerHTML = `<span style="width:${pct * 100}%"></span>`;
+
+  const red = css("--red");
+  const f = frame($("#payback"), line, niceMax(net * 1.08), { height: 260, fmt: v => usd(v),
+    tick: r => r.month.endsWith("-01") ? r.month.slice(0, 4) : null });
+  const path = pts => pts.map((p, i) => `${i ? "L" : "M"}${f.x(p.i)},${f.y(p.cumulative)}`).join("");
+  const pts = line.map((p, i) => ({ ...p, i }));
+  const lastActual = rows.length - 1;
+  el("path", { d: path(pts.slice(0, lastActual + 1)), fill: "none", stroke: red, "stroke-width": 2 }, f.svg);
+  el("path", { d: path(pts.slice(lastActual, payIdx + 1)), fill: "none", stroke: red, "stroke-width": 2,
+    "stroke-dasharray": "4 3", opacity: .7 }, f.svg);
+  // net cost line + label
+  el("line", { x1: f.m.l, x2: f.W - f.m.r, y1: f.y(net), y2: f.y(net), stroke: css("--ink-3"), "stroke-width": 1 }, f.svg);
+  const t = el("text", { x: f.m.l + 6, y: f.y(net) - 8, fill: css("--ink-2"), "font-size": 11, "font-family": css("--mono") }, f.svg);
+  t.textContent = `Net cost ${usd(net)}`;
+  // payback marker
+  el("rect", { x: f.x(payIdx) - 4, y: f.y(net) - 4, width: 8, height: 8, fill: red, stroke: css("--bg"), "stroke-width": 2 }, f.svg);
+  const pl = el("text", { x: f.x(payIdx) - 8, y: f.y(net) + 18, "text-anchor": "end", fill: css("--ink"),
+    "font-size": 11, "font-family": css("--mono") }, f.svg);
+  pl.textContent = `Paid off ~${label(payMonth)}`;
+
+  const cross = el("line", { y1: f.m.t, y2: f.y(0), stroke: css("--ink-3"), "stroke-dasharray": "2 3", opacity: 0 }, f.svg);
+  const dot = el("rect", { width: 8, height: 8, fill: red, stroke: css("--bg"), "stroke-width": 2, opacity: 0 }, f.svg);
+  const overlay = el("rect", { x: f.m.l, y: f.m.t, width: f.iw, height: f.ih, fill: "transparent" }, f.svg);
+  overlay.addEventListener("mousemove", ev => {
+    const b = f.svg.getBoundingClientRect();
+    const px = (ev.clientX - b.left) * (f.W / b.width);
+    const i = Math.max(0, Math.min(line.length - 1, Math.round((px - f.m.l - f.band / 2) / f.band)));
+    const p = line[i];
+    cross.setAttribute("x1", f.x(i)); cross.setAttribute("x2", f.x(i)); cross.setAttribute("opacity", 1);
+    dot.setAttribute("x", f.x(i) - 4); dot.setAttribute("y", f.y(p.cumulative) - 4); dot.setAttribute("opacity", 1);
+    f.showTip(i, `<div class="t">${label(p.month).toUpperCase()}${p.actual ? "" : " · PROJECTED"}</div>` +
+      row(red, p.actual ? "Saved to date" : "Projected", usd(p.cumulative), true) +
+      row(css("--ink-3"), "Remaining", usd(Math.max(0, net - p.cumulative)), true), f.y(p.cumulative));
+  });
+  overlay.addEventListener("mouseleave", () => { cross.setAttribute("opacity", 0); dot.setAttribute("opacity", 0); f.hideTip(); });
+}
+
 function render(rows) {
   let run = 0;
   rows.forEach(r => r.cumulative = (run += r.total_savings));
@@ -367,7 +462,8 @@ function render(rows) {
   const first = rows[0].month, last = rows[rows.length - 1].month;
 
   const lastRow = rows[rows.length - 1];
-  $("#sub").textContent = `Installed ${INSTALL} · Duke Energy bills ${period(rows[0])}, ${first.slice(0, 4)} – ${period(lastRow)}, ${(lastRow.end || last).slice(0, 4)} · energy valued at ${(RATE * 100).toFixed(1)}¢/kWh`;
+  const through = lastRow.end ? `${md(lastRow.end)}, ${lastRow.end.slice(0, 4)}` : label(last);
+  $("#sub").textContent = `Installed ${INSTALL} · Duke Energy bills through ${through} · energy valued at ${(RATE * 100).toFixed(1)}¢/kWh`;
 
   const fullMonths = rows.filter(r => !FLAGS[r.month]).slice(1, -1); // exclude flagged, first stub and current partial bill
   const avg = fullMonths.reduce((a, r) => a + r.total_savings, 0) / fullMonths.length;
@@ -380,6 +476,7 @@ function render(rows) {
   ].map(([c, l, v, n]) => `<div class="kpi ${c}"><div class="label">${l}</div><div class="value">${v}</div><div class="note">${n}</div></div>`).join("");
 
   drawBars(rows);
+  drawPayback(rows);
   drawLines($("#cumulative"), rows, [{ key: "cumulative", color: css("--red"), name: "Saved to date", fmt: v => usd(v, 2) }],
     { fmt: v => usd(v), area: true });
   drawLines($("#energy"), rows, [
@@ -392,7 +489,8 @@ function render(rows) {
     `the ${label(last)} bill is still open, so it has no credits yet. ` +
     `<b>Low production:</b> the ${Object.keys(FLAGS).map(label).join(" and ")} bills look like an outage or data gap. ` +
     `Bill credits assume ${CREDITS} on every closed bill. Export credit assumes 1:1 net metering. ` +
-    `Produced: ${num(produced)} kWh.`;
+    `Produced: ${num(produced)} kWh. ` +
+    `<b>Payback</b> uses the estimated tax credit; the projection is conservative because it includes the two low-production bills and values energy at ${(RATE * 100).toFixed(1)}¢/kWh.`;
 
   const cols = [
     ["month", "Bill", v => label(v)],
