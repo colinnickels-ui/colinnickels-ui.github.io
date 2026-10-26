@@ -217,8 +217,8 @@ const RATE = 0.114;
 const INSTALL = "6 Mar 2025";
 // Months with known data problems, shown in red with a note
 const FLAGS = {
-  "2026-06": "Solar production about half of normal while grid use nearly doubled; looks like a system outage.",
-  "2026-07": "Solar production about half of normal while grid use nearly doubled; looks like a system outage.",
+  "2026-06": "System was partially or entirely down during this bill.",
+  "2026-07": "System was partially or entirely down during this bill.",
 };
 const CREDITS = "EnergyWise Home Battery $53 per bill and AC $8 on May–Nov bills";
 const SYSTEM = {
@@ -536,7 +536,8 @@ function render(rows) {
   $("#notes").innerHTML =
     `<b>Notes.</b> Bills are labeled by the month they end. The first bill counts from the install on ${INSTALL}; ` +
     `the ${label(last)} bill is still open, so it has no credits yet. ` +
-    `<b>Low production:</b> the ${Object.keys(FLAGS).map(label).join(" and ")} bills look like an outage or data gap. ` +
+    `<b>System outage:</b> the solar system was partially or entirely down during the ${Object.keys(FLAGS).map(label).join(" and ")} bills ` +
+    `(mid-May to mid-July 2026), so those months show reduced production and savings. ` +
     `Bill credits: ${CREDITS}. ` +
     (modeled
       ? `"With solar" is what Duke actually charged (electric + tax, from your bills); the open bill is estimated. ` +
@@ -545,7 +546,7 @@ function render(rows) {
         `The "used at home" vs "export" split divides each bill's savings by kWh. `
       : `Export credit assumes 1:1 net metering. `) +
     `Produced: ${num(produced)} kWh. ` +
-    `<b>Payback</b> uses the estimated tax credit; the projection includes the two low-production bills, so it leans conservative.`;
+    `<b>Payback</b> uses the estimated tax credit; the projection includes the two outage bills, so it leans conservative.`;
 
   const cols = [
     ["month", "Bill", v => label(v)],
