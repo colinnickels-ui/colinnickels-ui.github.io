@@ -19,6 +19,7 @@
     --red: #e5484d;
     --red-dim: #7a2a2d;
     --gray: #8b8d98;
+    --credit: #e4e4e7;
     --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
   }
   * { box-sizing: border-box; border-radius: 0; margin: 0; padding: 0; }
@@ -133,10 +134,11 @@
 
   <section>
     <div class="sec-head">
-      <h2>Monthly savings<small>Dollars, split by where the solar went</small></h2>
+      <h2>Savings per bill<small>Duke Energy billing periods, by month the bill ends</small></h2>
       <div class="legend">
         <span><i style="background:var(--red)"></i>Used at home</span>
         <span><i style="background:var(--gray)"></i>Export credit</span>
+        <span><i style="background:var(--credit)"></i>Bill credits</span>
       </div>
     </div>
     <div class="chart" id="bars"></div>
@@ -151,7 +153,7 @@
     </section>
     <section>
       <div class="sec-head">
-        <h2>Energy<small>kWh per month</small></h2>
+        <h2>Energy<small>kWh per billing period</small></h2>
         <div class="legend">
           <span><i class="line" style="background:var(--red)"></i>Produced</span>
           <span><i class="line" style="background:var(--gray)"></i>From grid</span>
@@ -179,7 +181,11 @@
 const RATE = 0.114;
 const INSTALL = "6 Mar 2025";
 // Months with known data problems, shown in red with a note
-const FLAGS = { "2026-06": "Production far below normal; possible outage or data gap." };
+const FLAGS = {
+  "2026-06": "Production far below normal; possible outage or data gap.",
+  "2026-07": "Production far below normal; possible outage or data gap.",
+};
+const CREDITS = "EnergyWise Home Battery $53 + AC $8 per bill";
 
 const $ = s => document.querySelector(s);
 const NS = "http://www.w3.org/2000/svg";
@@ -188,6 +194,8 @@ const num = (v, d = 0) => v.toLocaleString("en-US", { minimumFractionDigits: d, 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const label = m => { const [y, mo] = m.split("-"); return `${MONTHS[+mo - 1]} ${y}`; };
 const short = m => { const [y, mo] = m.split("-"); return mo === "01" || mo === "03" && y === "2025" ? `${MONTHS[+mo - 1]} '${y.slice(2)}` : MONTHS[+mo - 1]; };
+const md = s => { const [, mo, d] = s.split("-"); return `${MONTHS[+mo - 1]} ${+d}`; };
+const period = r => r.start ? `${md(r.start)} – ${md(r.end)}` : label(r.month);
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 
 function el(tag, attrs = {}, parent) {
@@ -203,7 +211,8 @@ function parseCSV(text) {
   return lines.map(l => {
     const vals = l.split(",");
     const o = {};
-    keys.forEach((k, i) => o[k] = k === "month" ? vals[i] : +vals[i]);
+    keys.forEach((k, i) => o[k] = ["month", "start", "end"].includes(k) ? vals[i] : +vals[i]);
+    o.program_credits = o.program_credits || 0;
     return o;
   });
 }
@@ -266,23 +275,30 @@ const row = (color, name, val, line) =>
 const flagHtml = m => FLAGS[m] ? `<div class="flag">${FLAGS[m]}</div>` : "";
 
 function drawBars(rows) {
-  const red = css("--red"), gray = css("--gray");
+  const red = css("--red"), gray = css("--gray"), cred = css("--credit");
   const f = frame($("#bars"), rows, niceMax(Math.max(...rows.map(r => r.total_savings))), { height: 320, fmt: v => usd(v) });
   const bw = Math.min(36, f.band * 0.62), gap = 2;
   rows.forEach((r, i) => {
     const g = el("g", {}, f.svg);
     const x0 = f.x(i) - bw / 2;
-    const ySelf = f.y(r.self_used_savings);
-    el("rect", { x: x0, y: ySelf, width: bw, height: f.y(0) - ySelf, fill: red, opacity: FLAGS[r.month] ? .45 : 1 }, g);
+    const op = FLAGS[r.month] ? .45 : 1;
+    // stack bottom-up with a 2px surface gap between segments
+    let base = f.y(0);
+    [[r.self_used_savings, red], [r.export_credit, gray], [r.program_credits, cred]].reduce((acc, [v, fill], k) => {
+      const top = f.y(acc + v);
+      const h = base - top - (k ? gap : 0);
+      if (v > 0 && h > 0) el("rect", { x: x0, y: top, width: bw, height: h, fill, opacity: op }, g);
+      base = top;
+      return acc + v;
+    }, 0);
     const yTop = f.y(r.total_savings);
-    const hExp = ySelf - yTop - gap;
-    if (hExp > 0) el("rect", { x: x0, y: yTop, width: bw, height: hExp, fill: gray, opacity: FLAGS[r.month] ? .45 : 1 }, g);
     const hit = el("rect", { x: f.x(i) - f.band / 2, y: f.m.t, width: f.band, height: f.ih, fill: "transparent" }, g);
     hit.addEventListener("mouseenter", () => {
       g.querySelectorAll("rect").forEach(n => n !== hit && n.setAttribute("stroke", css("--ink")));
-      f.showTip(i, `<div class="t">${label(r.month).toUpperCase()}</div>` +
+      f.showTip(i, `<div class="t">${label(r.month).toUpperCase()} BILL · ${period(r).toUpperCase()}</div>` +
         row(red, "Used at home", usd(r.self_used_savings, 2)) +
         row(gray, "Export credit", usd(r.export_credit, 2)) +
+        row(cred, "Bill credits", usd(r.program_credits, 2)) +
         `<div class="r total"><span>Saved</span><span>${usd(r.total_savings, 2)}</span></div>` + flagHtml(r.month),
         yTop);
     });
@@ -328,7 +344,7 @@ function drawLines(container, rows, series, { fmt, height = 260, area = false } 
     series.forEach((s, k) => {
       dots[k].setAttribute("x", f.x(i) - 4); dots[k].setAttribute("y", f.y(r[s.key]) - 4); dots[k].setAttribute("opacity", 1);
     });
-    f.showTip(i, `<div class="t">${label(r.month).toUpperCase()}</div>` +
+    f.showTip(i, `<div class="t">${period(r).toUpperCase()}</div>` +
       series.map(s => row(s.color, s.name, s.fmt(r[s.key]), true)).join("") + flagHtml(r.month),
       f.y(r[series[0].key]));
   };
@@ -350,16 +366,17 @@ function render(rows) {
   const total = sum("total_savings"), produced = sum("produced_kwh");
   const first = rows[0].month, last = rows[rows.length - 1].month;
 
-  $("#sub").textContent = `Installed ${INSTALL} · ${label(first)} – ${label(last)} · valued at ${(RATE * 100).toFixed(1)}¢/kWh`;
+  const lastRow = rows[rows.length - 1];
+  $("#sub").textContent = `Installed ${INSTALL} · Duke Energy bills ${period(rows[0])}, ${first.slice(0, 4)} – ${period(lastRow)}, ${(lastRow.end || last).slice(0, 4)} · energy valued at ${(RATE * 100).toFixed(1)}¢/kWh`;
 
-  const fullMonths = rows.filter(r => !FLAGS[r.month]).slice(0, -1); // exclude flagged + partial current month
+  const fullMonths = rows.filter(r => !FLAGS[r.month]).slice(1, -1); // exclude flagged, first stub and current partial bill
   const avg = fullMonths.reduce((a, r) => a + r.total_savings, 0) / fullMonths.length;
   $("#kpis").innerHTML = [
-    ["hero", "Total saved", usd(total), `${rows.length} months`],
+    ["hero", "Total saved", usd(total), `${rows.length} bills`],
     ["", "Used at home", usd(sum("self_used_savings")), `${num(sum("self_used_kwh"))} kWh`],
     ["", "Export credit", usd(sum("export_credit")), `${num(sum("exported_kwh"))} kWh`],
-    ["", "Produced", num(produced), "kWh"],
-    ["", "Typical month", usd(avg), "excl. flagged/partial"],
+    ["", "Bill credits", usd(sum("program_credits")), "EnergyWise Home"],
+    ["", "Typical bill", usd(avg), "excl. flagged/partial"],
   ].map(([c, l, v, n]) => `<div class="kpi ${c}"><div class="label">${l}</div><div class="value">${v}</div><div class="note">${n}</div></div>`).join("");
 
   drawBars(rows);
@@ -371,24 +388,28 @@ function render(rows) {
   ], { fmt: v => num(v) });
 
   $("#notes").innerHTML =
-    `<b>Notes.</b> ${label(first)} counts from the install on ${INSTALL}. ${label(last)} is month-to-date. ` +
-    Object.entries(FLAGS).map(([m, t]) => `<b>${label(m)}:</b> ${t}`).join(" ") +
-    ` Export credit assumes 1:1 net metering at the same rate.`;
+    `<b>Notes.</b> Bills are labeled by the month they end. The first bill counts from the install on ${INSTALL}; ` +
+    `the ${label(last)} bill is still open, so it has no credits yet. ` +
+    `<b>Low production:</b> the ${Object.keys(FLAGS).map(label).join(" and ")} bills look like an outage or data gap. ` +
+    `Bill credits assume ${CREDITS} on every closed bill. Export credit assumes 1:1 net metering. ` +
+    `Produced: ${num(produced)} kWh.`;
 
   const cols = [
-    ["month", "Month", v => label(v)],
+    ["month", "Bill", v => label(v)],
+    ["start", "Period", (v, r) => period(r)],
     ["produced_kwh", "Produced kWh", v => num(v, 1)],
     ["self_used_kwh", "Self-used kWh", v => num(v, 1)],
     ["exported_kwh", "Exported kWh", v => num(v, 1)],
     ["grid_import_kwh", "Grid kWh", v => num(v, 1)],
     ["self_used_savings", "Home $", v => usd(v, 2)],
     ["export_credit", "Export $", v => usd(v, 2)],
+    ["program_credits", "Credits $", v => usd(v, 2)],
     ["total_savings", "Saved $", v => usd(v, 2)],
   ];
   $("#table").innerHTML =
     `<thead><tr>${cols.map(c => `<th>${c[1]}</th>`).join("")}</tr></thead>` +
-    `<tbody>${rows.map(r => `<tr>${cols.map(([k, , f]) => `<td class="${FLAGS[r.month] && k === "month" ? "flagged" : ""}">${f(r[k])}</td>`).join("")}</tr>`).join("")}</tbody>` +
-    `<tfoot><tr><td>Total</td>${cols.slice(1).map(([k, , f]) => `<td>${f(sum(k))}</td>`).join("")}</tr></tfoot>`;
+    `<tbody>${rows.map(r => `<tr>${cols.map(([k, , f]) => `<td class="${FLAGS[r.month] && k === "month" ? "flagged" : ""}">${f(r[k], r)}</td>`).join("")}</tr>`).join("")}</tbody>` +
+    `<tfoot><tr><td>Total</td><td></td>${cols.slice(2).map(([k, , f]) => `<td>${f(sum(k))}</td>`).join("")}</tr></tfoot>`;
 
   $("#foot").textContent = "Data: Tesla Fleet API calendar_history, exported to savings.csv.";
 }
