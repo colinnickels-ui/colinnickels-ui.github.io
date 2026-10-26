@@ -153,6 +153,18 @@
     <div class="chart" id="bars"></div>
   </section>
 
+  <section id="bill-section">
+    <div class="sec-head">
+      <h2>Bill check<small>Modeled Duke bill per period after credits, with and without solar</small></h2>
+      <div class="legend">
+        <span><i class="line" style="background:var(--gray)"></i>Without solar</span>
+        <span><i class="line" style="background:var(--red)"></i>With solar</span>
+        <span><i style="background:var(--credit)"></i>Actual bill</span>
+      </div>
+    </div>
+    <div class="chart" id="bills"></div>
+  </section>
+
   <section>
     <div class="sec-head">
       <h2>Payback<small>Savings so far against the system's net cost, projected forward at the last 12 bills' pace</small></h2>
@@ -238,7 +250,7 @@ function parseCSV(text) {
   return lines.map(l => {
     const vals = l.split(",");
     const o = {};
-    keys.forEach((k, i) => o[k] = ["month", "start", "end"].includes(k) ? vals[i] : +vals[i]);
+    keys.forEach((k, i) => o[k] = ["month", "start", "end"].includes(k) ? vals[i] : vals[i] === "" ? null : +vals[i]);
     o.program_credits = o.program_credits || 0;
     return o;
   });
@@ -251,23 +263,35 @@ function niceMax(v) {
 }
 
 // Shared chart frame: returns svg, scales and helpers
-function frame(container, rows, maxY, { height = 300, fmt = v => v, tick = null } = {}) {
+function frame(container, rows, maxY, { height = 300, fmt = v => v, tick = null, minY = 0 } = {}) {
   container.innerHTML = "";
   const W = container.clientWidth, H = height;
   const m = { t: 12, r: 8, b: 28, l: 52 };
   const iw = W - m.l - m.r, ih = H - m.t - m.b;
   const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, height: H }, container);
-  const y = v => m.t + ih - (v / maxY) * ih;
+  let tickVals;
+  if (minY < 0) {
+    // snap both ends to a shared nice step so 0 lands on a gridline
+    const step = niceMax((maxY - minY) / 5);
+    minY = Math.floor(minY / step) * step;
+    maxY = Math.ceil(maxY / step) * step;
+    tickVals = [];
+    for (let v = minY; v <= maxY + 1e-9; v += step) tickVals.push(v);
+  }
+  const y = v => m.t + ih - ((v - minY) / (maxY - minY)) * ih;
   const band = iw / rows.length;
   const x = i => m.l + band * i + band / 2;
 
   const grid = el("g", { class: "grid" }, svg);
   const axis = el("g", { class: "axis" }, svg);
   const isNice = s => { const p = Math.pow(10, Math.floor(Math.log10(s))); return [1, 2, 2.5, 5, 10].some(k => Math.abs(s / p - k) < 1e-9); };
-  const ticks = [5, 4, 6, 3].find(t => isNice(maxY / t)) || 4;
-  for (let i = 0; i <= ticks; i++) {
-    const v = maxY / ticks * i, yy = y(v);
-    if (i > 0) el("line", { x1: m.l, x2: W - m.r, y1: yy, y2: yy }, grid);
+  if (!tickVals) {
+    const ticks = [5, 4, 6, 3].find(t => isNice(maxY / t)) || 4;
+    tickVals = Array.from({ length: ticks + 1 }, (_, i) => maxY / ticks * i);
+  }
+  for (const v of tickVals) {
+    const yy = y(v);
+    if (Math.abs(v) > 1e-9) el("line", { x1: m.l, x2: W - m.r, y1: yy, y2: yy }, grid);
     const t = el("text", { x: m.l - 10, y: yy + 4, "text-anchor": "end" }, axis);
     t.textContent = fmt(v);
   }
@@ -295,7 +319,9 @@ function frame(container, rows, maxY, { height = 300, fmt = v => v, tick = null 
   }
   const hideTip = () => tip.style.opacity = 0;
 
-  return { svg, x, y, band, m, W, H, iw, ih, showTip, hideTip };
+  const f = { svg, x, y, band, m, W, H, iw, ih, showTip, hideTip };
+  svg.__frame = f;
+  return f;
 }
 
 const row = (color, name, val, line) =>
@@ -343,9 +369,9 @@ function drawBars(rows) {
 }
 
 // Line chart with crosshair; series = [{key, color, name, fmt}]
-function drawLines(container, rows, series, { fmt, height = 260, area = false } = {}) {
+function drawLines(container, rows, series, { fmt, height = 260, area = false, floor = 0 } = {}) {
   const maxY = niceMax(Math.max(...rows.flatMap(r => series.map(s => r[s.key]))));
-  const f = frame(container, rows, maxY, { height, fmt });
+  const f = frame(container, rows, maxY, { height, fmt, minY: floor });
   if (area) {
     const s = series[0];
     const id = "g" + Math.random().toString(36).slice(2);
@@ -388,6 +414,26 @@ function drawLines(container, rows, series, { fmt, height = 260, area = false } 
 }
 
 const nextMonth = m => { let [y, mo] = m.split("-").map(Number); mo === 12 ? (y++, mo = 1) : mo++; return `${y}-${String(mo).padStart(2, "0")}`; };
+
+function drawBills(rows) {
+  if (rows[0].bill_with_solar == null) { $("#bill-section").style.display = "none"; return; }
+  const pts = rows.map(r => ({ ...r,
+    without: r.bill_without_solar,
+    with: r.bill_with_solar - r.program_credits,
+    actual: r.actual_bill == null ? null : r.actual_bill - r.program_credits }));
+  drawLines($("#bills"), pts, [
+    { key: "without", color: css("--gray"), name: "Without solar", fmt: v => usd(v, 2) },
+    { key: "with", color: css("--red"), name: "With solar", fmt: v => usd(v, 2) },
+  ], { fmt: v => usd(v), floor: Math.min(0, ...pts.map(p => p.with)) });
+  // actual bills as squares on top of the modeled line
+  const svg = $("#bills svg");
+  const f = svg.__frame;
+  pts.forEach((p, i) => {
+    if (p.actual == null) return;
+    el("rect", { x: f.x(i) - 5, y: f.y(p.actual) - 5, width: 10, height: 10, fill: css("--credit"),
+      stroke: css("--bg"), "stroke-width": 2, "pointer-events": "none" }, svg);
+  });
+}
 
 function drawPayback(rows) {
   const net = SYSTEM.cost - SYSTEM.incentives.reduce((a, [, v]) => a + v, 0);
@@ -463,7 +509,9 @@ function render(rows) {
 
   const lastRow = rows[rows.length - 1];
   const through = lastRow.end ? `${md(lastRow.end)}, ${lastRow.end.slice(0, 4)}` : label(last);
-  $("#sub").textContent = `Installed ${INSTALL} · Duke Energy bills through ${through} · energy valued at ${(RATE * 100).toFixed(1)}¢/kWh`;
+  const modeled = rows[0].bill_with_solar != null;
+  const basis = modeled ? "savings = modeled Duke bill without solar − with solar" : `energy valued at ${(RATE * 100).toFixed(1)}¢/kWh`;
+  $("#sub").textContent = `Installed ${INSTALL} · Duke Energy bills through ${through} · ${basis}`;
 
   const fullMonths = rows.filter(r => !FLAGS[r.month]).slice(1, -1); // exclude flagged, first stub and current partial bill
   const avg = fullMonths.reduce((a, r) => a + r.total_savings, 0) / fullMonths.length;
@@ -476,6 +524,7 @@ function render(rows) {
   ].map(([c, l, v, n]) => `<div class="kpi ${c}"><div class="label">${l}</div><div class="value">${v}</div><div class="note">${n}</div></div>`).join("");
 
   drawBars(rows);
+  drawBills(rows);
   drawPayback(rows);
   drawLines($("#cumulative"), rows, [{ key: "cumulative", color: css("--red"), name: "Saved to date", fmt: v => usd(v, 2) }],
     { fmt: v => usd(v), area: true });
@@ -488,9 +537,14 @@ function render(rows) {
     `<b>Notes.</b> Bills are labeled by the month they end. The first bill counts from the install on ${INSTALL}; ` +
     `the ${label(last)} bill is still open, so it has no credits yet. ` +
     `<b>Low production:</b> the ${Object.keys(FLAGS).map(label).join(" and ")} bills look like an outage or data gap. ` +
-    `Bill credits assume ${CREDITS} on every closed bill. Export credit assumes 1:1 net metering. ` +
+    `Bill credits assume ${CREDITS} on every closed bill. ` +
+    (modeled
+      ? `Bills are modeled on Duke's residential rate (tiered energy charge, riders, storm charge, 7% tax) from the Oct 2026 bill, ` +
+        `including the $18.46/mo non-bypassable solar charge; monthly surplus exports earn ~4¢/kWh under the Net Metering Bridge rider. ` +
+        `Older bills use today's rates. The "used at home" vs "export" split divides each bill's savings by kWh. `
+      : `Export credit assumes 1:1 net metering. `) +
     `Produced: ${num(produced)} kWh. ` +
-    `<b>Payback</b> uses the estimated tax credit; the projection is conservative because it includes the two low-production bills and values energy at ${(RATE * 100).toFixed(1)}¢/kWh.`;
+    `<b>Payback</b> uses the estimated tax credit; the projection includes the two low-production bills, so it leans conservative.`;
 
   const cols = [
     ["month", "Bill", v => label(v)],
