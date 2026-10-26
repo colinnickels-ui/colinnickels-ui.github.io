@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Solar Savings</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0b0b0c;
+    --surface: #121214;
+    --line: #232327;
+    --grid: #1c1c20;
+    --ink: #ededef;
+    --ink-2: #a1a1aa;
+    --ink-3: #6b6b74;
+    --red: #e5484d;
+    --red-dim: #7a2a2d;
+    --gray: #8b8d98;
+    --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  }
+  * { box-sizing: border-box; border-radius: 0; margin: 0; padding: 0; }
+  html { background: var(--bg); }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 14px/1.5 Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: 1120px; margin: 0 auto; padding: 48px 24px 80px; }
+  header { border-bottom: 1px solid var(--line); padding-bottom: 24px; margin-bottom: 32px; }
+  .eyebrow {
+    font: 500 11px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase;
+    color: var(--red); margin-bottom: 14px;
+  }
+  h1 { font-size: 28px; font-weight: 600; letter-spacing: -.02em; }
+  .sub { color: var(--ink-2); margin-top: 6px; }
+
+  .kpis {
+    display: grid; grid-template-columns: repeat(5, 1fr);
+    border: 1px solid var(--line); margin-bottom: 40px;
+  }
+  .kpi { padding: 20px; border-right: 1px solid var(--line); background: var(--surface); }
+  .kpi:last-child { border-right: 0; }
+  .kpi.hero { border-top: 2px solid var(--red); }
+  .kpi .label {
+    font: 500 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3);
+  }
+  .kpi .value {
+    font-size: 26px; font-weight: 600; letter-spacing: -.02em; margin-top: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  .kpi.hero .value { color: var(--ink); font-size: 32px; }
+  .kpi .note { color: var(--ink-3); font-size: 12px; margin-top: 4px; }
+
+  section { margin-bottom: 48px; }
+  .sec-head {
+    display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap;
+    border-bottom: 1px solid var(--line); padding-bottom: 12px; margin-bottom: 16px;
+  }
+  h2 { font-size: 15px; font-weight: 600; }
+  h2 small { display: block; color: var(--ink-3); font-weight: 400; font-size: 12px; margin-top: 2px; }
+  .legend { display: flex; gap: 20px; color: var(--ink-2); font-size: 12px; }
+  .legend span { display: inline-flex; align-items: center; gap: 8px; }
+  .legend i { width: 10px; height: 10px; display: inline-block; }
+  .legend i.line { height: 2px; width: 16px; }
+
+  .chart { position: relative; }
+  .chart svg { display: block; width: 100%; overflow: visible; }
+  .axis text { fill: var(--ink-3); font: 11px var(--mono); }
+  .grid line { stroke: var(--grid); }
+  .baseline { stroke: var(--line); }
+
+  .tip {
+    position: absolute; pointer-events: none; opacity: 0; transition: opacity .08s;
+    background: #18181b; border: 1px solid #2e2e33; border-left: 2px solid var(--red);
+    padding: 10px 12px; font-size: 12px; min-width: 180px; z-index: 5;
+  }
+  .tip .t { font: 500 11px var(--mono); color: var(--ink-2); margin-bottom: 6px; letter-spacing: .06em; }
+  .tip .r { display: flex; justify-content: space-between; gap: 16px; font-variant-numeric: tabular-nums; }
+  .tip .r span:first-child { color: var(--ink-2); display: inline-flex; align-items: center; gap: 6px; }
+  .tip .r i { width: 8px; height: 8px; display: inline-block; }
+  .tip .r.total { border-top: 1px solid #2e2e33; margin-top: 6px; padding-top: 6px; font-weight: 600; }
+  .tip .flag { color: var(--red); margin-top: 6px; font-size: 11px; }
+
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
+
+  .notes { border: 1px solid var(--line); border-left: 2px solid var(--red); background: var(--surface); padding: 14px 16px; color: var(--ink-2); font-size: 13px; }
+  .notes b { color: var(--ink); font-weight: 600; }
+
+  details { border-top: 1px solid var(--line); }
+  summary {
+    cursor: pointer; list-style: none; padding: 14px 0; color: var(--ink-2);
+    font: 500 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase;
+  }
+  summary::-webkit-details-marker { display: none; }
+  summary::before { content: "+ "; color: var(--red); }
+  details[open] summary::before { content: "− "; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 13px; }
+  th, td { padding: 9px 12px; text-align: right; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--ink-3); font: 500 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; border-bottom-color: var(--line); }
+  tbody tr:hover { background: var(--surface); }
+  tfoot td { font-weight: 600; border-top: 1px solid var(--line); border-bottom: 0; }
+  td.flagged { color: var(--red); }
+
+  footer { color: var(--ink-3); font-size: 12px; border-top: 1px solid var(--line); padding-top: 16px; }
+  .error { color: var(--red); }
+
+  @media (max-width: 860px) {
+    .kpis { grid-template-columns: 1fr 1fr; }
+    .kpi { border-bottom: 1px solid var(--line); }
+    .kpi.hero { grid-column: 1 / -1; }
+    .split { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 520px) {
+    main { padding: 32px 16px 60px; }
+    h1 { font-size: 22px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Tesla Energy · Solar</div>
+    <h1>Solar savings</h1>
+    <p class="sub" id="sub">Loading…</p>
+  </header>
+
+  <div class="kpis" id="kpis"></div>
+
+  <section>
+    <div class="sec-head">
+      <h2>Monthly savings<small>Dollars, split by where the solar went</small></h2>
+      <div class="legend">
+        <span><i style="background:var(--red)"></i>Used at home</span>
+        <span><i style="background:var(--gray)"></i>Export credit</span>
+      </div>
+    </div>
+    <div class="chart" id="bars"></div>
+  </section>
+
+  <div class="split">
+    <section>
+      <div class="sec-head">
+        <h2>Cumulative savings<small>Running total since install</small></h2>
+      </div>
+      <div class="chart" id="cumulative"></div>
+    </section>
+    <section>
+      <div class="sec-head">
+        <h2>Energy<small>kWh per month</small></h2>
+        <div class="legend">
+          <span><i class="line" style="background:var(--red)"></i>Produced</span>
+          <span><i class="line" style="background:var(--gray)"></i>From grid</span>
+        </div>
+      </div>
+      <div class="chart" id="energy"></div>
+    </section>
+  </div>
+
+  <section>
+    <div class="notes" id="notes"></div>
+  </section>
+
+  <section>
+    <details>
+      <summary>Data table</summary>
+      <div class="table-wrap"><table id="table"></table></div>
+    </details>
+  </section>
+
+  <footer id="foot"></footer>
+</main>
+
+<script>
+const RATE = 0.114;
+const INSTALL = "6 Mar 2025";
+// Months with known data problems, shown in red with a note
+const FLAGS = { "2026-06": "Production far below normal; possible outage or data gap." };
+
+const $ = s => document.querySelector(s);
+const NS = "http://www.w3.org/2000/svg";
+const usd = (v, d = 0) => "$" + v.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+const num = (v, d = 0) => v.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const label = m => { const [y, mo] = m.split("-"); return `${MONTHS[+mo - 1]} ${y}`; };
+const short = m => { const [y, mo] = m.split("-"); return mo === "01" || mo === "03" && y === "2025" ? `${MONTHS[+mo - 1]} '${y.slice(2)}` : MONTHS[+mo - 1]; };
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+
+function el(tag, attrs = {}, parent) {
+  const n = document.createElementNS(NS, tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(n);
+  return n;
+}
+
+function parseCSV(text) {
+  const [head, ...lines] = text.trim().split(/\r?\n/);
+  const keys = head.split(",");
+  return lines.map(l => {
+    const vals = l.split(",");
+    const o = {};
+    keys.forEach((k, i) => o[k] = k === "month" ? vals[i] : +vals[i]);
+    return o;
+  });
+}
+
+function niceMax(v) {
+  const p = Math.pow(10, Math.floor(Math.log10(v)));
+  for (const m of [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10]) if (m * p >= v) return m * p;
+  return 10 * p;
+}
+
+// Shared chart frame: returns svg, scales and helpers
+function frame(container, rows, maxY, { height = 300, fmt = v => v } = {}) {
+  container.innerHTML = "";
+  const W = container.clientWidth, H = height;
+  const m = { t: 12, r: 8, b: 28, l: 52 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, height: H }, container);
+  const y = v => m.t + ih - (v / maxY) * ih;
+  const band = iw / rows.length;
+  const x = i => m.l + band * i + band / 2;
+
+  const grid = el("g", { class: "grid" }, svg);
+  const axis = el("g", { class: "axis" }, svg);
+  const isNice = s => { const p = Math.pow(10, Math.floor(Math.log10(s))); return [1, 2, 2.5, 5, 10].some(k => Math.abs(s / p - k) < 1e-9); };
+  const ticks = [5, 4, 6, 3].find(t => isNice(maxY / t)) || 4;
+  for (let i = 0; i <= ticks; i++) {
+    const v = maxY / ticks * i, yy = y(v);
+    if (i > 0) el("line", { x1: m.l, x2: W - m.r, y1: yy, y2: yy }, grid);
+    const t = el("text", { x: m.l - 10, y: yy + 4, "text-anchor": "end" }, axis);
+    t.textContent = fmt(v);
+  }
+  el("line", { class: "baseline", x1: m.l, x2: W - m.r, y1: y(0), y2: y(0) }, svg);
+
+  const every = band < 34 ? Math.ceil(34 / band) : 1;
+  rows.forEach((r, i) => {
+    if (i % every) return;
+    const t = el("text", { x: x(i), y: H - 8, "text-anchor": "middle" }, axis);
+    t.textContent = short(r.month);
+  });
+
+  const tip = document.createElement("div");
+  tip.className = "tip";
+  container.appendChild(tip);
+  function showTip(i, html, anchorY) {
+    tip.innerHTML = html;
+    tip.style.opacity = 1;
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    let left = x(i) + 14;
+    if (left + tw > W) left = x(i) - tw - 14;
+    tip.style.left = Math.max(0, left) + "px";
+    tip.style.top = Math.max(0, Math.min(H - th, anchorY - th / 2)) + "px";
+  }
+  const hideTip = () => tip.style.opacity = 0;
+
+  return { svg, x, y, band, m, W, H, iw, ih, showTip, hideTip };
+}
+
+const row = (color, name, val, line) =>
+  `<div class="r"><span><i style="background:${color}${line ? ";height:2px" : ""}"></i>${name}</span><span>${val}</span></div>`;
+const flagHtml = m => FLAGS[m] ? `<div class="flag">${FLAGS[m]}</div>` : "";
+
+function drawBars(rows) {
+  const red = css("--red"), gray = css("--gray");
+  const f = frame($("#bars"), rows, niceMax(Math.max(...rows.map(r => r.total_savings))), { height: 320, fmt: v => usd(v) });
+  const bw = Math.min(36, f.band * 0.62), gap = 2;
+  rows.forEach((r, i) => {
+    const g = el("g", {}, f.svg);
+    const x0 = f.x(i) - bw / 2;
+    const ySelf = f.y(r.self_used_savings);
+    el("rect", { x: x0, y: ySelf, width: bw, height: f.y(0) - ySelf, fill: red, opacity: FLAGS[r.month] ? .45 : 1 }, g);
+    const yTop = f.y(r.total_savings);
+    const hExp = ySelf - yTop - gap;
+    if (hExp > 0) el("rect", { x: x0, y: yTop, width: bw, height: hExp, fill: gray, opacity: FLAGS[r.month] ? .45 : 1 }, g);
+    const hit = el("rect", { x: f.x(i) - f.band / 2, y: f.m.t, width: f.band, height: f.ih, fill: "transparent" }, g);
+    hit.addEventListener("mouseenter", () => {
+      g.querySelectorAll("rect").forEach(n => n !== hit && n.setAttribute("stroke", css("--ink")));
+      f.showTip(i, `<div class="t">${label(r.month).toUpperCase()}</div>` +
+        row(red, "Used at home", usd(r.self_used_savings, 2)) +
+        row(gray, "Export credit", usd(r.export_credit, 2)) +
+        `<div class="r total"><span>Saved</span><span>${usd(r.total_savings, 2)}</span></div>` + flagHtml(r.month),
+        yTop);
+    });
+    hit.addEventListener("mouseleave", () => {
+      g.querySelectorAll("rect").forEach(n => n.removeAttribute("stroke"));
+      f.hideTip();
+    });
+  });
+  // direct label on the best month only
+  const best = rows.reduce((a, r, i) => r.total_savings > rows[a].total_savings ? i : a, 0);
+  const t = el("text", { x: f.x(best), y: f.y(rows[best].total_savings) - 8, "text-anchor": "middle",
+    fill: css("--ink-2"), "font-size": 11, "font-family": css("--mono") }, f.svg);
+  t.textContent = usd(rows[best].total_savings);
+}
+
+// Line chart with crosshair; series = [{key, color, name, fmt}]
+function drawLines(container, rows, series, { fmt, height = 260, area = false } = {}) {
+  const maxY = niceMax(Math.max(...rows.flatMap(r => series.map(s => r[s.key]))));
+  const f = frame(container, rows, maxY, { height, fmt });
+  if (area) {
+    const s = series[0];
+    const id = "g" + Math.random().toString(36).slice(2);
+    const grad = el("linearGradient", { id, x1: 0, x2: 0, y1: 0, y2: 1 }, el("defs", {}, f.svg));
+    el("stop", { offset: 0, "stop-color": s.color, "stop-opacity": .22 }, grad);
+    el("stop", { offset: 1, "stop-color": s.color, "stop-opacity": 0 }, grad);
+    const d = rows.map((r, i) => `${i ? "L" : "M"}${f.x(i)},${f.y(r[s.key])}`).join("") +
+      `L${f.x(rows.length - 1)},${f.y(0)}L${f.x(0)},${f.y(0)}Z`;
+    el("path", { d, fill: `url(#${id})` }, f.svg);
+  }
+  series.forEach(s => {
+    const d = rows.map((r, i) => `${i ? "L" : "M"}${f.x(i)},${f.y(r[s.key])}`).join("");
+    el("path", { d, fill: "none", stroke: s.color, "stroke-width": 2, "stroke-linejoin": "miter" }, f.svg);
+  });
+  const cross = el("line", { y1: f.m.t, y2: f.y(0), stroke: css("--ink-3"), "stroke-dasharray": "2 3", opacity: 0 }, f.svg);
+  const dots = series.map(s => el("rect", { width: 8, height: 8, fill: s.color, stroke: css("--bg"), "stroke-width": 2, opacity: 0 }, f.svg));
+  const overlay = el("rect", { x: f.m.l, y: f.m.t, width: f.iw, height: f.ih, fill: "transparent" }, f.svg);
+  const move = ev => {
+    const pt = f.svg.getBoundingClientRect();
+    const px = (ev.clientX - pt.left) * (f.W / pt.width);
+    const i = Math.max(0, Math.min(rows.length - 1, Math.round((px - f.m.l - f.band / 2) / f.band)));
+    const r = rows[i];
+    cross.setAttribute("x1", f.x(i)); cross.setAttribute("x2", f.x(i)); cross.setAttribute("opacity", 1);
+    series.forEach((s, k) => {
+      dots[k].setAttribute("x", f.x(i) - 4); dots[k].setAttribute("y", f.y(r[s.key]) - 4); dots[k].setAttribute("opacity", 1);
+    });
+    f.showTip(i, `<div class="t">${label(r.month).toUpperCase()}</div>` +
+      series.map(s => row(s.color, s.name, s.fmt(r[s.key]), true)).join("") + flagHtml(r.month),
+      f.y(r[series[0].key]));
+  };
+  overlay.addEventListener("mousemove", move);
+  overlay.addEventListener("mouseleave", () => {
+    cross.setAttribute("opacity", 0); dots.forEach(d => d.setAttribute("opacity", 0)); f.hideTip();
+  });
+  // end label on the first series
+  const last = rows.length - 1, s0 = series[0];
+  const t = el("text", { x: f.x(last) - 6, y: f.y(rows[last][s0.key]) - 10, "text-anchor": "end",
+    fill: css("--ink-2"), "font-size": 11, "font-family": css("--mono") }, f.svg);
+  t.textContent = s0.fmt(rows[last][s0.key]);
+}
+
+function render(rows) {
+  let run = 0;
+  rows.forEach(r => r.cumulative = (run += r.total_savings));
+  const sum = k => rows.reduce((a, r) => a + r[k], 0);
+  const total = sum("total_savings"), produced = sum("produced_kwh");
+  const first = rows[0].month, last = rows[rows.length - 1].month;
+
+  $("#sub").textContent = `Installed ${INSTALL} · ${label(first)} – ${label(last)} · valued at ${(RATE * 100).toFixed(1)}¢/kWh`;
+
+  const fullMonths = rows.filter(r => !FLAGS[r.month]).slice(0, -1); // exclude flagged + partial current month
+  const avg = fullMonths.reduce((a, r) => a + r.total_savings, 0) / fullMonths.length;
+  $("#kpis").innerHTML = [
+    ["hero", "Total saved", usd(total), `${rows.length} months`],
+    ["", "Used at home", usd(sum("self_used_savings")), `${num(sum("self_used_kwh"))} kWh`],
+    ["", "Export credit", usd(sum("export_credit")), `${num(sum("exported_kwh"))} kWh`],
+    ["", "Produced", num(produced), "kWh"],
+    ["", "Typical month", usd(avg), "excl. flagged/partial"],
+  ].map(([c, l, v, n]) => `<div class="kpi ${c}"><div class="label">${l}</div><div class="value">${v}</div><div class="note">${n}</div></div>`).join("");
+
+  drawBars(rows);
+  drawLines($("#cumulative"), rows, [{ key: "cumulative", color: css("--red"), name: "Saved to date", fmt: v => usd(v, 2) }],
+    { fmt: v => usd(v), area: true });
+  drawLines($("#energy"), rows, [
+    { key: "produced_kwh", color: css("--red"), name: "Produced", fmt: v => num(v, 1) + " kWh" },
+    { key: "grid_import_kwh", color: css("--gray"), name: "From grid", fmt: v => num(v, 1) + " kWh" },
+  ], { fmt: v => num(v) });
+
+  $("#notes").innerHTML =
+    `<b>Notes.</b> ${label(first)} counts from the install on ${INSTALL}. ${label(last)} is month-to-date. ` +
+    Object.entries(FLAGS).map(([m, t]) => `<b>${label(m)}:</b> ${t}`).join(" ") +
+    ` Export credit assumes 1:1 net metering at the same rate.`;
+
+  const cols = [
+    ["month", "Month", v => label(v)],
+    ["produced_kwh", "Produced kWh", v => num(v, 1)],
+    ["self_used_kwh", "Self-used kWh", v => num(v, 1)],
+    ["exported_kwh", "Exported kWh", v => num(v, 1)],
+    ["grid_import_kwh", "Grid kWh", v => num(v, 1)],
+    ["self_used_savings", "Home $", v => usd(v, 2)],
+    ["export_credit", "Export $", v => usd(v, 2)],
+    ["total_savings", "Saved $", v => usd(v, 2)],
+  ];
+  $("#table").innerHTML =
+    `<thead><tr>${cols.map(c => `<th>${c[1]}</th>`).join("")}</tr></thead>` +
+    `<tbody>${rows.map(r => `<tr>${cols.map(([k, , f]) => `<td class="${FLAGS[r.month] && k === "month" ? "flagged" : ""}">${f(r[k])}</td>`).join("")}</tr>`).join("")}</tbody>` +
+    `<tfoot><tr><td>Total</td>${cols.slice(1).map(([k, , f]) => `<td>${f(sum(k))}</td>`).join("")}</tr></tfoot>`;
+
+  $("#foot").textContent = "Data: Tesla Fleet API calendar_history, exported to savings.csv.";
+}
+
+fetch("savings.csv", { cache: "no-store" })
+  .then(r => { if (!r.ok) throw new Error(r.status); return r.text(); })
+  .then(text => {
+    const rows = parseCSV(text);
+    render(rows);
+    let t;
+    addEventListener("resize", () => { clearTimeout(t); t = setTimeout(() => render(rows), 120); });
+  })
+  .catch(e => { $("#sub").innerHTML = `<span class="error">Couldn't load savings.csv (${e.message}).</span>`; });
+</script>
+</body>
+</html>
